@@ -85,6 +85,30 @@ Alerts are sent to PagerDuty and Slack (#ops-alerts channel).
 | DBConnectionPool | Pool exhaustion risk | Critical | 10 minutes |
 | QueueBacklog | Queue depth > 10000 for 5 minutes | Warning | 15 minutes |
 
+### Deployment History
+
+Deployment history can be exported for audits and incident review without scraping terminal output. The deployment tool allows listing deployments for an environment, filtering by service, and exporting in JSON or text formats. Secret-looking values are automatically redacted.
+
+To list recent deployments for a specific environment:
+```bash
+python3 tools/deploy.py --list --env production
+```
+
+To list all deployments across all environments:
+```bash
+python3 tools/deploy.py --list --env all
+```
+
+To filter by service:
+```bash
+python3 tools/deploy.py --list --env staging --service backend
+```
+
+To export as JSON (includes operator):
+```bash
+python3 tools/deploy.py --list --env all --format json
+```
+
 ## Incident Response
 
 ### Severity Levels

@@ -27,6 +27,7 @@ Usage:
 import argparse
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -354,23 +355,67 @@ def rollback_service(service: str, env: str, version: str) -> bool:
                           skip_build=True, skip_test=True, skip_health=False)
 
 
-def list_deployments(env: str, service: Optional[str] = None):
-    history = load_deployment_history(env)
+def redact_secrets(text: str) -> str:
+    if not isinstance(text, str):
+        return text
+    text = re.sub(r'(?i)(password|secret|token|key|bearer)[\s=:_-]*[\'"]?([a-zA-Z0-9_\-\.]{8,})[\'"]?', r'\1=***REDACTED***', text)
+    return text
+
+def redact_entry(entry: Dict) -> Dict:
+    redacted = {}
+    for k, v in entry.items():
+        if isinstance(v, str):
+            redacted[k] = redact_secrets(v)
+        else:
+            redacted[k] = v
+    return redacted
+
+
+def list_deployments(env: str, service: Optional[str] = None, output_format: str = "text"):
+    envs_to_check = list(ENVIRONMENTS.keys()) if env == "all" else [env]
+    history = []
+    
+    for e in envs_to_check:
+        env_history = load_deployment_history(e)
+        for d in env_history:
+            d["environment"] = e
+        history.extend(env_history)
+        
+    history.sort(key=lambda x: x.get("timestamp", ""))
+
     if service:
-        history = [d for d in history if d["service"] == service]
+        history = [d for d in history if d.get("service") == service]
+
+    if output_format == "json":
+        json_output = []
+        for entry in history:
+            redacted = redact_entry(entry)
+            operator = redacted.get("deployed_by", "unknown")
+            json_output.append({
+                "service": redacted.get("service", "unknown"),
+                "environment": redacted.get("environment", "unknown"),
+                "version": redacted.get("version", "unknown"),
+                "timestamp": redacted.get("timestamp", "unknown"),
+                "status": redacted.get("status", "unknown"),
+                "operator": operator
+            })
+        print(json.dumps(json_output, indent=2))
+        return
 
     print(f"\nDeployment history for {env}:")
-    print(f"{'Timestamp':<25} {'Service':<15} {'Version':<15} {'Status':<15}")
-    print("-" * 70)
+    print(f"{'Timestamp':<25} {'Env':<10} {'Service':<15} {'Version':<15} {'Status':<15}")
+    print("-" * 80)
     for entry in history[-20:]:
-        print(f"{entry['timestamp']:<25} {entry['service']:<15} "
-              f"{entry['version']:<15} {entry['status']:<15}")
+        entry = redact_entry(entry)
+        env_display = entry.get("environment", "unknown")
+        print(f"{entry.get('timestamp', 'unknown'):<25} {env_display:<10} {entry.get('service', 'unknown'):<15} "
+              f"{entry.get('version', 'unknown'):<15} {entry.get('status', 'unknown'):<15}")
     print()
 
 
 def parse_args():
     parser = argparse.ArgumentParser(description="Deployment tool")
-    parser.add_argument("--env", "-e", required=True, choices=list(ENVIRONMENTS.keys()),
+    parser.add_argument("--env", "-e", required=True, choices=list(ENVIRONMENTS.keys()) + ["all"],
                        help="Target environment")
     parser.add_argument("--service", "-s", default="all", choices=list(SERVICES.keys()) + ["all"],
                        help="Service to deploy")
@@ -382,6 +427,7 @@ def parse_args():
     parser.add_argument("--rollback", action="store_true", help="Rollback instead of deploy")
     parser.add_argument("--version", help="Version to rollback to")
     parser.add_argument("--list", action="store_true", help="List deployments")
+    parser.add_argument("--format", "-f", choices=["text", "json"], default="text", help="Output format for list")
     parser.add_argument("--dry-run", action="store_true", help="Show what would be done")
     parser.add_argument("--verbose", "-v", action="store_true", help="Verbose output")
     return parser.parse_args()
@@ -391,8 +437,12 @@ def main():
     args = parse_args()
 
     if args.list:
-        list_deployments(args.env, args.service if args.service != "all" else None)
+        list_deployments(args.env, args.service if args.service != "all" else None, args.format)
         return 0
+
+    if args.env == "all":
+        print("ERROR: --env all is only supported with --list")
+        return 1
 
     if args.rollback:
         if not args.version:

@@ -51,7 +51,15 @@ def run_text_process(cmd: list[str], **kwargs) -> subprocess.CompletedProcess[st
         kwargs.setdefault("errors", "replace")
     if kwargs.get("env") is not None:
         kwargs["env"] = subprocess_env(kwargs["env"])
-    return subprocess.run(cmd, **kwargs)
+    try:
+        return subprocess.run(cmd, **kwargs)
+    except FileNotFoundError as e:
+        return subprocess.CompletedProcess(
+            args=cmd,
+            returncode=1,
+            stdout="",
+            stderr=f"FileNotFoundError: {e}"
+        )
 
 
 configure_text_encoding()
